@@ -1,8 +1,6 @@
 # Guía de Uso — Sistema de Compresión 4DGS
 
 Sistema modular de compresión post-entrenamiento para modelos 4D Gaussian Splatting.  
-Pipeline: **Modelo 4DGS → Compresión → Chunks → Transmisión (Mininet) → Decodificación → PLYs → SuperSplat**
-
 ---
 
 ## Tabla de Contenidos
