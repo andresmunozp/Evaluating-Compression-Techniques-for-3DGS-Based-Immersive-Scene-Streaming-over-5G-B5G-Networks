@@ -1,107 +1,107 @@
-# Guía de Uso — Sistema de Compresión 4DGS
+# Usage Guide — 4DGS Compression System
 
-Sistema modular de compresión post-entrenamiento para modelos 4D Gaussian Splatting.  
+Modular post-training compression system for 4D Gaussian Splatting models.  
 ---
 
-## Tabla de Contenidos
+## Table of Contents
 
-1. [Requisitos Previos](#1-requisitos-previos)
-2. [Estructura de Archivos](#2-estructura-de-archivos)
-3. [Inicio Rápido](#3-inicio-rápido)
-4. [Paso 1 — Comprimir](#4-paso-1--comprimir-compresspy)
-5. [Paso 2 — Descomprimir](#5-paso-2--descomprimir-decompresspy)
-6. [Paso 3 — Benchmark Completo](#6-paso-3--benchmark-completo-benchmark_compressionpy)
-7. [Configuraciones YAML](#7-configuraciones-yaml)
-8. [Crear tu propia configuración](#8-crear-tu-propia-configuración)
-9. [Integración con Mininet](#9-integración-con-mininet)
-10. [Visualización en SuperSplat](#10-visualización-en-supersplat)
-11. [Interpretación de Resultados](#11-interpretación-de-resultados)
-12. [Solución de Problemas](#12-solución-de-problemas)
-13. [API Python (uso programático)](#13-api-python-uso-programático)
+1. [Prerequisites](#1-prerequisites)
+2. [File Structure](#2-file-structure)
+3. [Quick Start](#3-quick-start)
+4. [Step 1 — Compress (`compress.py`)](#4-step-1--compress-compresspy)
+5. [Step 2 — Decompress (`decompress.py`)](#5-step-2--decompress-decompresspy)
+6. [Step 3 — Full Benchmark (`benchmark_compression.py`)](#6-step-3--full-benchmark-benchmark_compressionpy)
+7. [YAML Configurations](#7-yaml-configurations)
+8. [Create Your Own Configuration](#8-create-your-own-configuration)
+9. [Integration with Mininet](#9-integration-with-mininet)
+10. [Visualization in SuperSplat](#10-visualization-in-supersplat)
+11. [Interpreting Results](#11-interpreting-results)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Python API (programmatic use)](#13-python-api-programmatic-use)
 
 ---
 
-## 1. Requisitos Previos
+## 1. Prerequisites
 
-### Entorno Conda
+### Conda Environment
 
-Usa el mismo entorno donde entrenas 4DGS (necesita PyTorch + CUDA):
+Use the same environment where you train 4DGS models; it requires PyTorch + CUDA:
 
 ```powershell
 conda activate Gaussians4D
 ```
 
-### Dependencias
+### Dependencies
 
-Las dependencias base ya están instaladas con 4DGaussians. Opcionales:
+The base dependencies are already installed with 4DGaussians. Optional dependencies:
 
 ```bash
-# Para compresión zstd (mejor ratio que zlib)
+# For zstd compression (better ratio than zlib)
 pip install zstandard
 
-# Para compresión lz4 (más rápida que zlib)
+# For lz4 compression (faster than zlib)
 pip install lz4
 
-# Para cargar configs tipo mmcv (solo si usas configs .py de arguments/)
+# For loading mmcv-style configs (only if you use .py configs from arguments/)
 pip install mmcv
 ```
 
-### Modelo Entrenado
+### Trained Model
 
-Necesitas un modelo 4DGS ya entrenado. La estructura esperada es:
+You need an already trained 4DGS model. The expected structure is:
 
 ```
 output/dynerf/coffee_martini_sirvio/
 ├── point_cloud/
 │   └── iteration_14000/
-│       ├── point_cloud.ply           ← Gaussians canónicos
-│       ├── deformation.pth           ← Red de deformación
-│       ├── deformation_table.pth     ← Tabla auxiliar
-│       └── deformation_accum.pth     ← Acumulador auxiliar
+│       ├── point_cloud.ply           ← Canonical Gaussians
+│       ├── deformation.pth           ← Deformation network
+│       ├── deformation_table.pth     ← Auxiliary table
+│       └── deformation_accum.pth     ← Auxiliary accumulator
 ├── cameras.json
 └── cfg_args
 ```
 
 ---
 
-## 2. Estructura de Archivos
+## 2. File Structure
 
 ```
 compression/
-├── __init__.py              # Exporta la API pública
+├── __init__.py              # Exports the public API
 ├── base.py                  # GaussianData, DeformationData, CompressionStrategy (ABC)
-├── serializer.py            # Formato binario .4dgs (manifest + checksums)
-├── pipeline.py              # Pipeline composable de estrategias
-├── chunker.py               # Divide en .4dgsc para transmisión por red
+├── serializer.py            # .4dgs binary format (manifest + checksums)
+├── pipeline.py              # Composable strategy pipeline
+├── chunker.py               # Splits into .4dgsc files for network transmission
 ├── strategies/
-│   ├── __init__.py           # Registro de estrategias
-│   ├── quantization.py       # float16, int8, int16 por atributo
-│   ├── pruning.py            # Poda por opacidad/deformación/redundancia
-│   ├── sh_reduction.py       # Truncar armónicos esféricos (grado 3→0,1,2)
-│   ├── hexplane_compression.py  # Comprimir grids HexPlane (quantize/SVD/downsample)
-│   └── entropy_coding.py     # Codificación sin pérdida (zlib/gzip/zstd/lz4)
+│   ├── __init__.py           # Strategy registry
+│   ├── quantization.py       # float16, int8, int16 by attribute
+│   ├── pruning.py            # Pruning by opacity/deformation/redundancy
+│   ├── sh_reduction.py       # Truncate spherical harmonics (degree 3→0,1,2)
+│   ├── hexplane_compression.py  # Compress HexPlane grids (quantize/SVD/downsample)
+│   └── entropy_coding.py     # Lossless coding (zlib/gzip/zstd/lz4)
 └── configs/
-    ├── lossless.yaml          # Solo entropy coding
-    ├── quantize_only.yaml     # Solo float16
-    ├── balanced.yaml          # Equilibrio calidad/tamaño
-    ├── aggressive.yaml        # Máxima compresión
-    ├── streaming_optimized.yaml # Optimizado para baja latencia
-    ├── hexplane_svd.yaml      # Solo SVD en HexPlane
-    └── hexplane_downsample.yaml # Solo downsample en HexPlane
+    ├── lossless.yaml          # Entropy coding only
+    ├── quantize_only.yaml     # Float16 only
+    ├── balanced.yaml          # Quality/size balance
+    ├── aggressive.yaml        # Maximum compression
+    ├── streaming_optimized.yaml # Optimized for low latency
+    ├── hexplane_svd.yaml      # SVD only on HexPlane
+    └── hexplane_downsample.yaml # Downsample only on HexPlane
 
-compress.py                  # Script principal de compresión
-decompress.py                # Script de descompresión + exportación PLY
-benchmark_compression.py     # Benchmark comparativo con métricas de calidad + QoE
+compress.py                  # Main compression script
+decompress.py                # Decompression + PLY export script
+benchmark_compression.py     # Comparative benchmark with quality + QoE metrics
 ```
 
 ---
 
-## 3. Inicio Rápido
+## 3. Quick Start
 
-Ejemplo mínimo usando tu modelo **coffee_martini_sirvio**:
+Minimal example using your **coffee_martini_sirvio** model:
 
 ```powershell
-# 1. Comprimir con configuración balanceada
+# 1. Compress with the balanced configuration
 python compress.py ^
     --model_path output/dynerf/coffee_martini_sirvio ^
     --iteration 14000 ^
@@ -109,17 +109,17 @@ python compress.py ^
     --output compressed_output/balanced ^
     --chunk_size 524288
 
-# 2. Descomprimir y exportar PLYs
+# 2. Decompress and export PLYs
 python decompress.py ^
     --input compressed_output/balanced ^
     --output decompressed_output/balanced ^
     --configs arguments/dynerf/coffee_martini.py ^
     --num_frames 300
 
-# 3. Ver en SuperSplat
-#    Abrir decompressed_output/balanced/gaussian_pertimestamp/ en SuperSplat
+# 3. View in SuperSplat
+#    Open decompressed_output/balanced/gaussian_pertimestamp/ in SuperSplat
 
-# Comandos para WSL:
+# Commands for WSL:
 python compress.py --model_path output/dynerf/coffee_martini_sirvio --iteration 14000 --config compression/configs/balanced.yaml --output compressed_output/balanced --chunk_size 524288
 
 python decompress.py --input compressed_output/balanced --output decompressed_output/balanced --configs arguments/dynerf/coffee_martini.py --num_frames 300
@@ -128,9 +128,9 @@ python decompress.py --input compressed_output/balanced --output decompressed_ou
 
 ---
 
-## 4. Paso 1 — Comprimir (`compress.py`)
+## 4. Step 1 — Compress (`compress.py`)
 
-### Uso Básico
+### Basic Usage
 
 ```powershell
 python compress.py ^
@@ -140,30 +140,30 @@ python compress.py ^
     --output compressed_output/balanced
 ```
 
-### Parámetros
+### Parameters
 
-| Parámetro | Tipo | Default | Descripción |
+| Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `--model_path` | str | **requerido** | Directorio del modelo entrenado |
-| `--iteration` | int | `-1` (última) | Iteración a cargar |
-| `--config` | str | **requerido** | Archivo YAML con la configuración de compresión |
-| `--output` | str | `compressed_output` | Directorio de salida |
-| `--chunk_size` | int | `1048576` (1 MB) | Tamaño máximo por chunk en bytes |
-| `--no_chunks` | flag | — | Escribir un solo archivo `.4dgs` en vez de chunks |
+| `--model_path` | str | **required** | Directory of the trained model |
+| `--iteration` | int | `-1` (latest) | Iteration to load |
+| `--config` | str | **required** | YAML file with the compression configuration |
+| `--output` | str | `compressed_output` | Output directory |
+| `--chunk_size` | int | `1048576` (1 MB) | Maximum size per chunk in bytes |
+| `--no_chunks` | flag | — | Write a single `.4dgs` file instead of chunks |
 
-### Salida
+### Output
 
 ```
 compressed_output/balanced/
-├── chunk_00000_of_00005.4dgsc    ← Chunks para transmisión
+├── chunk_00000_of_00005.4dgsc    ← Chunks for transmission
 ├── chunk_00001_of_00005.4dgsc
 ├── chunk_00002_of_00005.4dgsc
 ├── chunk_00003_of_00005.4dgsc
 ├── chunk_00004_of_00005.4dgsc
-└── compression_report.json       ← Reporte detallado
+└── compression_report.json       ← Detailed report
 ```
 
-### Ejemplo de salida en consola
+### Example console output
 
 ```
 Loading model from output/dynerf/coffee_martini_sirvio at iteration 14000
@@ -185,9 +185,9 @@ Written 9 chunks to compressed_output/balanced/
 Report saved to compressed_output/balanced/compression_report.json
 ```
 
-### Archivo único (sin chunks)
+### Single file (without chunks)
 
-Si no necesitas chunks para transmisión:
+If you do not need chunks for transmission:
 
 ```powershell
 python compress.py ^
@@ -197,13 +197,13 @@ python compress.py ^
     --no_chunks
 ```
 
-Esto genera un solo archivo `model.4dgs`.
+This generates a single `model.4dgs` file.
 
 ---
 
-## 5. Paso 2 — Descomprimir (`decompress.py`)
+## 5. Step 2 — Decompress (`decompress.py`)
 
-### Uso Básico
+### Basic Usage
 
 ```powershell
 python decompress.py ^
@@ -213,40 +213,40 @@ python decompress.py ^
     --num_frames 300
 ```
 
-### Parámetros
+### Parameters
 
-| Parámetro | Tipo | Default | Descripción |
+| Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `--input` | str | **requerido** | Directorio con chunks `.4dgsc` o archivo `.4dgs` |
-| `--output` | str | `decompressed_output` | Directorio de salida |
-| `--configs` | str | `None` | Config de hiperparámetros del modelo (p.ej. `arguments/dynerf/coffee_martini.py`) |
-| `--num_frames` | int | `300` | Número de frames a exportar |
-| `--no_verify` | flag | — | Saltar verificación de checksums |
-| `--compression_config` | str | `None` | YAML de compresión (se usa el embebido si no se da) |
+| `--input` | str | **required** | Directory with `.4dgsc` chunks or `.4dgs` file |
+| `--output` | str | `decompressed_output` | Output directory |
+| `--configs` | str | `None` | Model hyperparameter config, e.g., `arguments/dynerf/coffee_martini.py` |
+| `--num_frames` | int | `300` | Number of frames to export |
+| `--no_verify` | flag | — | Skip checksum verification |
+| `--compression_config` | str | `None` | Compression YAML; the embedded one is used if not provided |
 
-### Las 3 Fases
+### The 3 Phases
 
-El script separa los tiempos en 3 fases independientes:
+The script separates timing into 3 independent phases:
 
-| Fase | Qué hace | Relevancia |
-|------|----------|------------|
-| **1. Assembly** | Reensambla los chunks `.4dgsc` → archivo `.4dgs` | Mide overhead de formato |
-| **2. Decode** | Descomprime el archivo → `GaussianData` + `DeformationData` | **Latencia de red** (tiempo que tarda en estar listo tras recibir) |
-| **3. Export** | Ejecuta la red de deformación por frame → escribe PLYs | Tiempo de renderizado |
+| Phase | What it does | Relevance |
+|------|--------------|-----------|
+| **1. Assembly** | Reassembles `.4dgsc` chunks → `.4dgs` file | Measures format overhead |
+| **2. Decode** | Decompresses the file → `GaussianData` + `DeformationData` | **Network latency**: time until the model is ready after receiving it |
+| **3. Export** | Runs the deformation network per frame → writes PLYs | Rendering time |
 
-### Salida
+### Output
 
 ```
 decompressed_output/balanced/
 ├── gaussian_pertimestamp/
-│   ├── time_00000.ply      ← PLYs compatibles con SuperSplat
+│   ├── time_00000.ply      ← PLYs compatible with SuperSplat
 │   ├── time_00001.ply
 │   ├── ...
 │   └── time_00299.ply
 └── decompression_report.json
 ```
 
-### Ejemplo de salida en consola
+### Example console output
 
 ```
 ============================================================
@@ -279,7 +279,7 @@ TIMING SUMMARY
   Decode+Export:   46.015s  (end-to-end reconstruction)
 ```
 
-### Desde un archivo único
+### From a single file
 
 ```powershell
 python decompress.py ^
@@ -291,11 +291,11 @@ python decompress.py ^
 
 ---
 
-## 6. Paso 3 — Benchmark Completo (`benchmark_compression.py`)
+## 6. Step 3 — Full Benchmark (`benchmark_compression.py`)
 
-Compara múltiples configuraciones de compresión de una sola vez.
+Compares multiple compression configurations in a single run.
 
-### Uso Básico
+### Basic Usage
 
 ```powershell
 python benchmark_compression.py ^
@@ -314,23 +314,23 @@ python benchmark_compression.py ^
     --bandwidth_mbps 10
 ```
 
-### Parámetros
+### Parameters
 
-| Parámetro | Tipo | Default | Descripción |
+| Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `--model_path` | str | **requerido** | Directorio del modelo |
-| `--iteration` | int | `-1` | Iteración |
-| `--source_path` | str | **requerido** | Directorio del dataset fuente |
-| `--configs` | str | `None` | Config de hiperparámetros |
-| `--compression_configs` | str[] | **requerido** | Lista de YAMLs a comparar |
-| `--output_dir` | str | `benchmark_results` | Directorio de resultados |
-| `--num_frames` | int | `50` | Frames para evaluar |
-| `--bandwidth_mbps` | float | `10.0` | Ancho de banda simulado para QoE |
-| `--chunk_size` | int | `1048576` | Tamaño de chunk |
-| `--skip_vmaf` | flag | — | Saltar cálculo de VMAF |
-| `--skip_render` | flag | — | Solo métricas de compresión (sin renderizado) |
+| `--model_path` | str | **required** | Model directory |
+| `--iteration` | int | `-1` | Iteration |
+| `--source_path` | str | **required** | Source dataset directory |
+| `--configs` | str | `None` | Hyperparameter config |
+| `--compression_configs` | str[] | **required** | List of YAML files to compare |
+| `--output_dir` | str | `benchmark_results` | Results directory |
+| `--num_frames` | int | `50` | Frames to evaluate |
+| `--bandwidth_mbps` | float | `10.0` | Simulated bandwidth for QoE |
+| `--chunk_size` | int | `1048576` | Chunk size |
+| `--skip_vmaf` | flag | — | Skip VMAF calculation |
+| `--skip_render` | flag | — | Compression metrics only, without rendering |
 
-### Solo métricas de compresión (rápido, sin GPU de render)
+### Compression metrics only (fast, no rendering GPU)
 
 ```powershell
 python benchmark_compression.py ^
@@ -345,35 +345,35 @@ python benchmark_compression.py ^
     --bandwidth_mbps 5
 ```
 
-### Probar con diferentes anchos de banda
+### Test with different bandwidths
 
 ```powershell
-# Simular enlace lento (1 Mbps)
+# Simulate a slow link (1 Mbps)
 python benchmark_compression.py ... --bandwidth_mbps 1 --output_dir bench_1mbps
 
-# Simular enlace medio (10 Mbps)
+# Simulate a medium link (10 Mbps)
 python benchmark_compression.py ... --bandwidth_mbps 10 --output_dir bench_10mbps
 
-# Simular enlace rápido (100 Mbps)
+# Simulate a fast link (100 Mbps)
 python benchmark_compression.py ... --bandwidth_mbps 100 --output_dir bench_100mbps
 ```
 
-### Salida
+### Output
 
 ```
 benchmark_results/
-├── benchmark_results.json     ← Resultados completos (JSON)
-├── benchmark_summary.csv      ← Tabla resumen (CSV)
-├── reference/                 ← Frames renderizados del modelo original
+├── benchmark_results.json     ← Full results (JSON)
+├── benchmark_summary.csv      ← Summary table (CSV)
+├── reference/                 ← Rendered frames from the original model
 ├── lossless/
-│   └── decompressed/          ← PLYs descomprimidos
+│   └── decompressed/          ← Decompressed PLYs
 ├── balanced/
 │   └── decompressed/
 └── aggressive/
     └── decompressed/
 ```
 
-### Ejemplo de tabla de comparación
+### Example comparison table
 
 ```
 Config               Size MB  Ratio  Save%  Decode Startup  Rebuf  QoE
@@ -387,79 +387,79 @@ streaming_optimized     6.15   6.94  85.6%  0.723s    1.22s      0  4.6
 
 ---
 
-## 7. Configuraciones YAML
+## 7. YAML Configurations
 
-### Disponibles
+### Available
 
-| Archivo | Estrategias | Caso de uso |
-|---------|-------------|-------------|
-| `lossless.yaml` | Entropy (zlib-9) | Baseline sin pérdida |
-| `quantize_only.yaml` | Float16 | ~50% reducción, pérdida mínima |
-| `balanced.yaml` | Pruning + SH→1 + fp16 + HexPlane + zlib | Equilibrio general |
-| `aggressive.yaml` | Pruning fuerte + SH→0 + int8 + SVD + zlib | Máxima compresión |
-| `streaming_optimized.yaml` | Pruning + SH→1 + fp16 + HexPlane + zlib-9 | Baja latencia Mininet |
-| `hexplane_svd.yaml` | SVD rank-8 | Evaluar SVD aislado |
-| `hexplane_downsample.yaml` | Downsample 2x | Evaluar downsample aislado |
-| `lightgaussian_balanced.yaml` | LightGaussian 30% + SH→1 + fp16 + HexPlane + zlib | Pruning por significancia global (equilibrado) |
-| `lightgaussian_aggressive.yaml` | LightGaussian 60% + SH→0 + int8 + SVD + zlib-9 | Pruning por significancia global (agresivo) |
+| File | Strategies | Use case |
+|------|------------|----------|
+| `lossless.yaml` | Entropy (zlib-9) | Lossless baseline |
+| `quantize_only.yaml` | Float16 | ~50% reduction, minimal loss |
+| `balanced.yaml` | Pruning + SH→1 + fp16 + HexPlane + zlib | General balance |
+| `aggressive.yaml` | Strong pruning + SH→0 + int8 + SVD + zlib | Maximum compression |
+| `streaming_optimized.yaml` | Pruning + SH→1 + fp16 + HexPlane + zlib-9 | Low-latency Mininet |
+| `hexplane_svd.yaml` | SVD rank-8 | Evaluate SVD in isolation |
+| `hexplane_downsample.yaml` | Downsample 2x | Evaluate downsampling in isolation |
+| `lightgaussian_balanced.yaml` | LightGaussian 30% + SH→1 + fp16 + HexPlane + zlib | Global-significance pruning (balanced) |
+| `lightgaussian_aggressive.yaml` | LightGaussian 60% + SH→0 + int8 + SVD + zlib-9 | Global-significance pruning (aggressive) |
 
 ---
 
-## 8. Crear tu propia configuración
+## 8. Create Your Own Configuration
 
-Crea un archivo YAML en `compression/configs/`. Formato:
+Create a YAML file in `compression/configs/`. Format:
 
 ```yaml
-# mi_config.yaml
+# my_config.yaml
 strategies:
-  - name: NombreDeLaClase
+  - name: ClassName
     params:
-      param1: valor1
-      param2: valor2
+      param1: value1
+      param2: value2
 
-  - name: OtraEstrategia
+  - name: AnotherStrategy
     params:
       ...
 ```
 
-### Estrategias disponibles y sus parámetros
+### Available strategies and their parameters
 
-#### `PruningStrategy` — Poda de Gaussians (por umbrales)
+#### `PruningStrategy` — Gaussian pruning by thresholds
 
 ```yaml
 - name: PruningStrategy
   params:
-    opacity_threshold: 0.005     # Eliminar Gaussians con opacidad < umbral (sigmoid-space)
-    deformation_threshold: null  # Eliminar con poca deformación acumulada
-    redundancy_radius: null      # Radio para eliminar duplicados (KDTree)
-    max_gaussians: 150000        # Límite máximo de Gaussians
+    opacity_threshold: 0.005     # Remove Gaussians with opacity < threshold (sigmoid-space)
+    deformation_threshold: null  # Remove Gaussians with low accumulated deformation
+    redundancy_radius: null      # Radius for removing duplicates (KDTree)
+    max_gaussians: 150000        # Maximum number of Gaussians
 ```
 
-#### `LightGaussianPruningStrategy` — Poda por Significancia Global (LightGaussian)
+#### `LightGaussianPruningStrategy` — Global Significance Pruning (LightGaussian)
 
-Implementa el *Volume-weighted Importance Score* del paper
-[LightGaussian (Fan et al., NeurIPS 2024)](https://arxiv.org/abs/2311.17245).
+Implements the *Volume-weighted Importance Score* from the
+[LightGaussian (Fan et al., NeurIPS 2024)](https://arxiv.org/abs/2311.17245) paper.
 
-**Diferencia con `PruningStrategy`:** en vez de umbrales fijos de opacidad,
-calcula un *Global Significance Score* por Gaussiana que combina:
-- **Volumen** (producto de escalas activadas)
-- **Importancia** (opacidad o visibilidad en vistas de entrenamiento)
+**Difference from `PruningStrategy`:** instead of fixed opacity thresholds,
+it computes a *Global Significance Score* for each Gaussian by combining:
+- **Volume** (product of activated scales)
+- **Importance** (opacity or visibility in training views)
 
-Las Gaussianas con menor puntuación global son podadas. Además, incorpora
-un factor opcional de **deformación 4DGS-aware** que protege Gaussians
-dinámicamente relevantes (extensión original para 4DGS).
+Gaussians with the lowest global score are pruned. It also includes
+an optional **4DGS-aware deformation** factor that protects dynamically
+relevant Gaussians (an original extension for 4DGS).
 
 ```yaml
-# Modo rápido (solo parámetros, sin GPU/cámaras)
+# Fast mode (parameters only, no GPU/cameras)
 - name: LightGaussianPruningStrategy
   params:
-    prune_percent: 0.3           # Fracción de Gaussians a eliminar (0.0–1.0)
-    v_pow: 0.1                   # Exponente para ratio de volumen normalizado
-    importance_mode: parameter   # "parameter" (rápido) o "render" (GPU + cámaras)
-    deformation_weight: 0.5      # Peso del bonus de deformación (0 = desactivado)
-    prune_decay: 1.0             # Factor de decay iterativo
+    prune_percent: 0.3           # Fraction of Gaussians to remove (0.0–1.0)
+    v_pow: 0.1                   # Exponent for normalized volume ratio
+    importance_mode: parameter   # "parameter" (fast) or "render" (GPU + cameras)
+    deformation_weight: 0.5      # Weight of the deformation bonus (0 = disabled)
+    prune_decay: 1.0             # Iterative decay factor
 
-# Modo render (más fiel al paper, necesita source_path + GPU)
+# Render mode (closer to the paper, requires source_path + GPU)
 - name: LightGaussianPruningStrategy
   params:
     prune_percent: 0.3
@@ -470,100 +470,100 @@ dinámicamente relevantes (extensión original para 4DGS).
     model_path: output/dynerf/coffee_martini_sirvio
     iteration: 14000
     configs: arguments/dynerf/coffee_martini.py
-    num_views: 50                # Cámaras a muestrear para visibilidad
-    temporal_samples: 5          # Timestamps por cámara (4DGS)
+    num_views: 50                # Cameras to sample for visibility
+    temporal_samples: 5          # Timestamps per camera (4DGS)
 ```
 
-**Parámetros detallados:**
+**Detailed parameters:**
 
-| Parámetro | Tipo | Default | Descripción |
+| Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `prune_percent` | float | 0.3 | Fracción de Gaussians a eliminar (bottom X% por score) |
-| `prune_decay` | float | 1.0 | Multiplicador de decay (para encadenar pruning iterativo) |
-| `v_pow` | float | 0.1 | Exponente del ratio de volumen normalizado |
-| `importance_mode` | str | `parameter` | `"parameter"`: sigmoid(opacity). `"render"`: visibilidad con forward passes |
-| `deformation_weight` | float | 0.0 | Peso del bonus de deformación acumulada (4DGS-aware). 0 = off |
-| `source_path` | str | None | Path al dataset (solo modo `render`) |
-| `model_path` | str | None | Path al modelo (solo modo `render`) |
-| `iteration` | int | -1 | Iteración del modelo (solo modo `render`) |
-| `configs` | str | None | Config de hiperparámetros de la red de deformación |
-| `num_views` | int | 50 | Vistas de entrenamiento a muestrear (modo `render`) |
-| `temporal_samples` | int | 5 | Timestamps uniformes por cámara (modo `render`) |
+| `prune_percent` | float | 0.3 | Fraction of Gaussians to remove (bottom X% by score) |
+| `prune_decay` | float | 1.0 | Decay multiplier for chaining iterative pruning |
+| `v_pow` | float | 0.1 | Exponent of the normalized volume ratio |
+| `importance_mode` | str | `parameter` | `"parameter"`: sigmoid(opacity). `"render"`: visibility with forward passes |
+| `deformation_weight` | float | 0.0 | Weight of the accumulated deformation bonus (4DGS-aware). 0 = off |
+| `source_path` | str | None | Dataset path (render mode only) |
+| `model_path` | str | None | Model path (render mode only) |
+| `iteration` | int | -1 | Model iteration (render mode only) |
+| `configs` | str | None | Deformation-network hyperparameter config |
+| `num_views` | int | 50 | Training views to sample (render mode) |
+| `temporal_samples` | int | 5 | Uniform timestamps per camera (render mode) |
 
-#### `SHReductionStrategy` — Reducir armónicos esféricos
+#### `SHReductionStrategy` — Reduce spherical harmonics
 
 ```yaml
 - name: SHReductionStrategy
   params:
-    target_sh_degree: 1    # 0, 1, o 2 (original es 3)
-    # Grado 0 → solo color DC (máxima reducción, ~76%)
-    # Grado 1 → 3 coeficientes más (buena calidad)
-    # Grado 2 → 8 coeficientes más
+    target_sh_degree: 1    # 0, 1, or 2 (the original is 3)
+    # Degree 0 → DC color only (maximum reduction, ~76%)
+    # Degree 1 → 3 additional coefficients (good quality)
+    # Degree 2 → 8 additional coefficients
 ```
 
-#### `QuantizationStrategy` — Cuantización
+#### `QuantizationStrategy` — Quantization
 
 ```yaml
 - name: QuantizationStrategy
   params:
     attribute_dtypes:
-      xyz: float16          # Opciones: float16, int8, int16, uint8
+      xyz: float16          # Options: float16, int8, int16, uint8
       features_dc: float16
       features_rest: float16
       opacity: float16
       scaling: float16
       rotation: float16
-    quantize_deformation: false  # true → también cuantizar red de deformación a fp16
+    quantize_deformation: false  # true → also quantize the deformation network to fp16
 ```
 
-#### `HexPlaneCompressionStrategy` — Comprimir grids HexPlane
+#### `HexPlaneCompressionStrategy` — Compress HexPlane grids
 
 ```yaml
-# OPCIÓN A: Baseline seguro (cuantizar a float16)
+# OPTION A: Safe baseline (quantize to float16)
 - name: HexPlaneCompressionStrategy
   params:
-    method: quantize       # Siempre seguro, ~50% en grids
+    method: quantize       # Always safe, ~50% reduction in grids
 
-# OPCIÓN B: Experimental SVD (truncated SVD por canal)
+# OPTION B: Experimental SVD (truncated SVD per channel)
 - name: HexPlaneCompressionStrategy
   params:
     method: svd
-    svd_rank: 8            # Menor rank = más compresión + más pérdida
+    svd_rank: 8            # Lower rank = more compression + more loss
 
-# OPCIÓN C: Experimental downsample
+# OPTION C: Experimental downsampling
 - name: HexPlaneCompressionStrategy
   params:
     method: downsample
-    downsample_factor: 2.0  # Factor de reducción espacial
+    downsample_factor: 2.0  # Spatial reduction factor
 ```
 
-#### `EntropyCodingStrategy` — Codificación lossless
+#### `EntropyCodingStrategy` — Lossless coding
 
 ```yaml
 - name: EntropyCodingStrategy
   params:
-    algorithm: zlib   # Opciones: zlib, gzip, zstd, lz4
-    level: 6          # Nivel de compresión (1-9 para zlib/gzip, 1-22 para zstd)
+    algorithm: zlib   # Options: zlib, gzip, zstd, lz4
+    level: 6          # Compression level (1-9 for zlib/gzip, 1-22 for zstd)
 ```
 
-### Orden Recomendado
+### Recommended Order
 
-Las estrategias se aplican **en orden secuencial**. El orden recomendado es:
+Strategies are applied **sequentially**. The recommended order is:
 
-1. **PruningStrategy** o **LightGaussianPruningStrategy** — Primero eliminar datos innecesarios
-2. **SHReductionStrategy** — Luego reducir dimensionalidad
-3. **QuantizationStrategy** — Cuantizar lo que queda
-4. **HexPlaneCompressionStrategy** — Comprimir la red de deformación
-5. **EntropyCodingStrategy** — Siempre al final (compresión lossless del resultado)
+1. **PruningStrategy** or **LightGaussianPruningStrategy** — First remove unnecessary data
+2. **SHReductionStrategy** — Then reduce dimensionality
+3. **QuantizationStrategy** — Quantize what remains
+4. **HexPlaneCompressionStrategy** — Compress the deformation network
+5. **EntropyCodingStrategy** — Always last (lossless compression of the result)
 
-> **Nota:** `PruningStrategy` y `LightGaussianPruningStrategy` son módulos independientes.
-> Puedes usar uno u otro, o incluso ambos en secuencia (primero LightGaussian
-> para significancia global, luego PruningStrategy para limpieza adicional).
+> **Note:** `PruningStrategy` and `LightGaussianPruningStrategy` are independent modules.
+> You can use one or the other, or even both sequentially: first LightGaussian
+> for global significance, then PruningStrategy for additional cleanup.
 
-### Ejemplo personalizado
+### Custom example
 
 ```yaml
-# mi_streaming_lento.yaml — Para enlaces de 1 Mbps
+# my_slow_streaming.yaml — For 1 Mbps links
 strategies:
   - name: PruningStrategy
     params:
@@ -598,75 +598,75 @@ strategies:
 ```powershell
 python compress.py ^
     --model_path output/dynerf/coffee_martini_sirvio ^
-    --config compression/configs/mi_streaming_lento.yaml ^
-    --output compressed_output/mi_config ^
+    --config compression/configs/my_slow_streaming.yaml ^
+    --output compressed_output/my_config ^
     --chunk_size 262144
 ```
 
 ---
 
-## 9. Integración con Mininet
+## 9. Integration with Mininet
 
-### Flujo completo
+### Complete flow
 
 ```
-[Host A]                            [Red Mininet]                      [Host B]
+[Host A]                            [Mininet Network]                  [Host B]
   compress.py                                                           decompress.py
-  → .4dgsc chunks ──── enviar secuencialmente ────→ recibir chunks ──→ → PLYs
+  → .4dgsc chunks ──── send sequentially ────→ receive chunks ──→ → PLYs
                          (TCP socket, scp, etc.)
 ```
 
-### Paso a paso
+### Step by step
 
 ```powershell
-# === En Host A (emisor) ===
+# === On Host A (sender) ===
 
-# 1. Comprimir (ajustar chunk_size según MTU/ventana TCP)
+# 1. Compress (adjust chunk_size according to MTU/TCP window)
 python compress.py ^
     --model_path output/dynerf/coffee_martini_sirvio ^
     --config compression/configs/streaming_optimized.yaml ^
     --output /tmp/chunks ^
     --chunk_size 524288
 
-# 2. Los chunks están en /tmp/chunks/*.4dgsc
-#    Enviarlos por la red Mininet (scp, netcat, socket TCP, etc.)
+# 2. The chunks are in /tmp/chunks/*.4dgsc
+#    Send them through the Mininet network (scp, netcat, TCP socket, etc.)
 
-# Ejemplo con netcat:
+# Example with netcat:
 for f in /tmp/chunks/chunk_*.4dgsc; do
     cat "$f" | nc -q 1 10.0.0.2 9000
 done
 
-# === En Host B (receptor) ===
+# === On Host B (receiver) ===
 
-# 3. Recibir chunks en un directorio
+# 3. Receive chunks into a directory
 mkdir -p /tmp/received_chunks
-# (tu script Mininet de recepción guarda los chunks aquí)
+# (your Mininet receiving script saves the chunks here)
 
-# 4. Descomprimir
+# 4. Decompress
 python decompress.py ^
     --input /tmp/received_chunks ^
     --output /tmp/decompressed ^
     --configs arguments/dynerf/coffee_martini.py ^
     --num_frames 300
 
-# 5. Abrir /tmp/decompressed/gaussian_pertimestamp/ en SuperSplat
+# 5. Open /tmp/decompressed/gaussian_pertimestamp/ in SuperSplat
 ```
 
 ---
 
-## 10. Visualización en SuperSplat
+## 10. Visualization in SuperSplat
 
-### Cargar secuencia de PLYs
+### Load a PLY sequence
 
-1. Abre **SuperSplat** en el navegador
-2. Carga los archivos `time_XXXXX.ply` desde `decompressed_output/balanced/gaussian_pertimestamp/`
-3. SuperSplat reproduce la animación frame a frame
+1. Open **SuperSplat** in the browser
+2. Load the `time_XXXXX.ply` files from `decompressed_output/balanced/gaussian_pertimestamp/`
+3. SuperSplat plays the animation frame by frame
 
-Los PLYs exportados son **100% compatibles** con el formato de `export_perframe_3DGS.py`.
+The exported PLYs are **100% compatible** with the `export_perframe_3DGS.py` format.
 
 ---
 
-## 11. Interpretación de Resultados
+## 11. Interpreting Results
 
 ### `compression_report.json`
 
@@ -674,8 +674,8 @@ Los PLYs exportados son **100% compatibles** con el formato de `export_perframe_
 {
   "original_size_bytes": 42670000,
   "compressed_size_bytes": 8320000,
-  "compression_ratio": 5.13,        // Veces más pequeño
-  "savings_pct": 80.5,              // % de ahorro
+  "compression_ratio": 5.13,        // Times smaller
+  "savings_pct": 80.5,              // % savings
   "compression_time_s": 1.234,
   "num_gaussians": 134521,
   "num_chunks": 9,
@@ -687,58 +687,58 @@ Los PLYs exportados son **100% compatibles** con el formato de `export_perframe_
 
 ```json
 {
-  "assemble_time_s": 0.023,    // Rearmar chunks → no relevante en red real
-  "decode_time_s": 0.892,      // LATENCIA DE RED (tiempo hasta tener el modelo listo)
-  "export_time_s": 45.123,     // Ejecutar deformación + escribir PLYs
+  "assemble_time_s": 0.023,    // Reassembling chunks → not relevant in a real network
+  "decode_time_s": 0.892,      // NETWORK LATENCY (time until the model is ready)
+  "export_time_s": 45.123,     // Run deformation + write PLYs
   "total_time_s": 46.038,
-  "num_gaussians": 115642,     // Puede ser < original si hubo pruning
+  "num_gaussians": 115642,     // May be < original if pruning was applied
   "num_frames": 300
 }
 ```
 
 ---
 
-## 12. Solución de Problemas
+## 12. Troubleshooting
 
 ### Error: `ModuleNotFoundError: No module named 'torch'`
 
-Activa el entorno correcto:
+Activate the correct environment:
 ```powershell
 conda activate Gaussians4D
 ```
 
 ### Error: `FileNotFoundError: PLY not found`
 
-Verifica que la ruta y la iteración sean correctas:
+Verify that the path and iteration are correct:
 ```powershell
-# Listar iteraciones disponibles
+# List available iterations
 dir output\dynerf\coffee_martini_sirvio\point_cloud
 ```
 
 ### Error: `Import "zstandard" could not be resolved`
 
-Esto es solo un warning. zstd es opcional. Si quieres usarlo:
+This is only a warning. zstd is optional. If you want to use it:
 ```bash
 pip install zstandard
 ```
 
-### Error: `mmcv` no encontrado
+### Error: `mmcv` not found
 
-Es opcional. Sin él se usan hiperparámetros por defecto. Si tus resultados se ven mal:
+It is optional. Without it, default hyperparameters are used. If your results look bad:
 ```bash
 pip install mmcv
 ```
-O pasa los parámetros correctos de la red de deformación manualmente.
+Or pass the correct deformation-network parameters manually.
 
-### La descompresión es lenta en la Fase 3
+### Decompression is slow in Phase 3
 
-La Fase 3 (Export) ejecuta la red de deformación en GPU para cada frame. Es normal que tome 30-120 segundos para 300 frames. Para reducirlo:
-- Usa `--num_frames 50` para pruebas
-- Asegúrate de que estás usando GPU (CUDA)
+Phase 3 (Export) runs the deformation network on the GPU for each frame. It is normal for it to take 30–120 seconds for 300 frames. To reduce it:
+- Use `--num_frames 50` for testing
+- Make sure you are using the GPU (CUDA)
 
-### Los PLYs no se ven bien en SuperSplat
+### The PLYs do not look right in SuperSplat
 
-Verifica que la configuración de hiperparámetros sea correcta pasando `--configs`:
+Verify that the hyperparameter configuration is correct by passing `--configs`:
 ```powershell
 python decompress.py ^
     --input compressed_output/balanced ^
@@ -749,9 +749,9 @@ python decompress.py ^
 
 ---
 
-## 13. API Python (uso programático)
+## 13. Python API (programmatic use)
 
-### Compresión básica
+### Basic compression
 
 ```python
 import numpy as np
@@ -759,29 +759,29 @@ import torch
 from compression.base import GaussianData, DeformationData
 from compression.pipeline import CompressionPipeline
 
-# Cargar datos
+# Load data
 from compress import load_gaussian_data, load_deformation_data
 
 gaussian = load_gaussian_data("output/dynerf/coffee_martini_sirvio", 14000)
 deformation = load_deformation_data("output/dynerf/coffee_martini_sirvio", 14000)
 
-# Crear pipeline desde YAML
+# Create pipeline from YAML
 pipeline = CompressionPipeline.from_yaml("compression/configs/balanced.yaml")
 
-# Comprimir → archivo binario
+# Compress → binary file
 archive = pipeline.compress_to_archive(gaussian, deformation)
 print(f"Compressed: {len(archive) / 1e6:.2f} MB")
 
-# Ver estadísticas
+# View statistics
 pipeline.print_stats()
 
-# Descomprimir
+# Decompress
 pipeline2 = CompressionPipeline.from_yaml("compression/configs/balanced.yaml")
 dec_gaussian, dec_deformation, manifest = pipeline2.decompress_from_archive(archive)
 print(f"Decompressed: {dec_gaussian.num_gaussians} Gaussians")
 ```
 
-### Pipeline desde diccionario
+### Pipeline from a dictionary
 
 ```python
 config = {
@@ -795,21 +795,21 @@ config = {
 pipeline = CompressionPipeline.from_config(config)
 ```
 
-### Chunking manual
+### Manual chunking
 
 ```python
 from compression.chunker import ModelChunker, ModelAssembler
 
-# Dividir
+# Split
 chunker = ModelChunker(chunk_size=512 * 1024)  # 512 KB
 paths = chunker.split_and_write(archive, "output_chunks/")
 
-# Reensamblar
+# Reassemble
 reassembled = ModelAssembler.assemble_from_dir("output_chunks/")
 assert archive == reassembled
 ```
 
-### Leer solo el manifest (sin descomprimir)
+### Read only the manifest (without decompressing)
 
 ```python
 from compression.serializer import ModelSerializer
